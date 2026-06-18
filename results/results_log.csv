@@ -1,1 +1,2 @@
 date,experiment,model,metric,value,notes
+2026-06-18,A2 feature set,NA,n_origination_features,88,Leakage-free feature list built from dictionary+data-verified audit; all 88 confirmed present in data
