@@ -62,3 +62,26 @@ if (length(missing_cols) == 0) {
   cat("WARNING - these names are not in the data:\n")
   print(missing_cols)
 }
+----------------------------------------------------------
+
+# ---- Define the binary default target ----
+# Good (0): Fully Paid. Bad (1): Charged Off, Default.
+# Everything else is excluded: outcome not yet resolved (Current, Late,
+# In Grace Period), blank, or legacy "does not meet credit policy" groups.
+
+good_status <- c("Fully Paid")
+bad_status  <- c("Charged Off", "Default")
+
+# Keep only loans with a resolved outcome
+loans <- loans_raw[loan_status %in% c(good_status, bad_status)]
+
+# Create the target: 1 = default (bad), 0 = good
+loans[, default := as.integer(loan_status %in% bad_status)]
+
+# ---- Report ----
+cat("Loans before filtering:", nrow(loans_raw), "\n")
+cat("Loans after keeping resolved outcomes:", nrow(loans), "\n")
+cat("Default rate:", round(mean(loans$default) * 100, 2), "%\n")
+
+# Sanity check: cross-tab of status vs target
+loans[, .N, by = .(loan_status, default)][order(-N)]
