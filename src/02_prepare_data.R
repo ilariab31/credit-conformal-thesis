@@ -85,3 +85,27 @@ cat("Default rate:", round(mean(loans$default) * 100, 2), "%\n")
 
 # Sanity check: cross-tab of status vs target
 loans[, .N, by = .(loan_status, default)][order(-N)]
+
+
+------------------------------------------------------
+
+# ---- Build the vintage (origination time) from issue_d ----
+# issue_d looks like "Dec-2015". We parse it to a real date, then extract
+# the year (primary analysis unit) and year-quarter (kept for robustness).
+
+library(lubridate)
+
+# Parse "Mon-YYYY" into a proper date (1st of that month)
+loans[, issue_date := lubridate::my(issue_d)]   # my() = month-year parser
+
+# Primary vintage: year of origination
+loans[, vintage_year := year(issue_date)]
+
+# Secondary (kept in reserve): year-quarter, e.g. "2015-Q4"
+loans[, vintage_quarter := paste0(year(issue_date), "-Q", quarter(issue_date))]
+
+# ---- Report: how many loans per year? ----
+loans[, .(
+  n_loans = .N,
+  default_rate = round(mean(default) * 100, 1)
+), by = vintage_year][order(vintage_year)]
