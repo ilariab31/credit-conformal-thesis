@@ -4,3 +4,4 @@ date,experiment,model,metric,value,notes
 2026-06-18,A3 target definition,NA,default_rate_pct,19.96,"Target: FullyPaid=0, ChargedOff+Default=1, unresolved excluded. 1,345,350 resolved loans. Rate matches literature ~20%"
 2026-06-19,A4 vintage built,NA,n_vintages_years,12,"Vintages 2007-2018. Early years sparse (2007=251, 2008=1562). Default rate peaks 2016-17 (~23%); 2018 low (15.8%) likely maturation artefact"
 2026-06-19,A4 maturity check,NA,months_observed_by_vintage,,"Maturity falls off: 2015=41mo, 2016=30mo, 2017=18mo, 2018=7mo. ~25% of loans are 60mth throughout. Evaluation horizon should stop ~2015-2016; later vintages immature (2018 rate 15.8% is artefact)"
+2026-06-20,A3 clean dataset saved,NA,rows_x_cols,,"Saved data/processed/loans_clean.rds: 1,345,350 resolved loans x 156 cols. Full table kept (incl. cashflow fields for later profit eval); leakage prevented via ORIGINATION_FEATURES. Reproducible from src/02_prepare_data.R"
