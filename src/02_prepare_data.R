@@ -109,3 +109,27 @@ loans[, .(
   n_loans = .N,
   default_rate = round(mean(default) * 100, 1)
 ), by = vintage_year][order(vintage_year)]
+
+
+-----------------------------------------------------
+  # ---- Measure maturity per vintage ----
+# How much observation time has each vintage had, relative to the data
+# cutoff? Loans need roughly their full term (36 or 60 months) to mature.
+
+# Data cutoff: the dataset ends 2018-Q4, so latest issue ~ Dec 2018.
+cutoff_date <- max(loans$issue_date, na.rm = TRUE)
+cat("Latest issue date in data:", format(cutoff_date), "\n\n")
+
+# Months of observation available for each loan (issue date -> cutoff)
+loans[, months_observed := lubridate::interval(issue_date, cutoff_date) %/% months(1)]
+
+# Summarise by vintage year: loan counts, term mix, observation time
+# Recompute maturity table with the confirmed term spelling
+maturity_by_vintage <- loans[, .(
+  n_loans          = .N,
+  pct_60mth        = round(mean(term == "60 months") * 100, 1),
+  avg_months_obs   = round(mean(months_observed), 0),
+  default_rate     = round(mean(default) * 100, 1)
+), by = vintage_year][order(vintage_year)]
+
+print(maturity_by_vintage)
