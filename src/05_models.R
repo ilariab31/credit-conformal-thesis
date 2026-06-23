@@ -182,3 +182,72 @@ e1_all <- rbind(e1_woe,
                 lgbm_clean = metrics(pl_clean, yq1))
 cat("\n--- E1: base models, 2014-Q1 ---\n")
 print(round(e1_all, 4))
+
+
+# =====================================================
+# 05_models.R  —  Section 3: Rolling evaluation across all 8 test quarters
+# -----------------------------------------------------
+# Frozen models (fit on 2012-2013) predict on each later quarter in turn.
+# No retraining: any metric change across quarters is pure model-ageing /
+# drift. This is the first view of the thesis's central decay phenomenon,
+# and the harness reused by all downstream experiments.
+# Prerequisites: Sections 1-2 of this script have run in this session.
+# =====================================================
+
+stopifnot(exists("m_full"), exists("m_clean"),
+          exists("lgb_full"), exists("lgb_clean"),
+          exists("test_woe"), exists("test_lgb"), exists("test_vq"),
+          exists("metrics"),
+          exists("feats_full"), exists("feats_clean"),
+          exists("feats_full_lgb"), exists("feats_clean_lgb"))
+
+quarters <- sort(unique(test_vq))
+
+# Predict-and-score one model on one quarter, return the 5 metrics.
+score_quarter <- function(model_kind, q) {
+  if (model_kind %in% c("woe_full", "woe_clean")) {
+    rows <- test_woe[vintage_quarter == q]
+    y <- rows$default
+    p <- if (model_kind == "woe_full")
+      predict(m_full,  newdata = rows, type = "response")
+    else
+      predict(m_clean, newdata = rows, type = "response")
+  } else {
+    sel <- test_vq == q
+    y <- test_lgb$default[sel]
+    if (model_kind == "lgbm_full") {
+      p <- predict(lgb_full, mat_for(test_lgb, feats_full_lgb)[sel, ],
+                   num_iteration = lgb_full$best_iter)
+    } else {
+      p <- predict(lgb_clean, mat_for(test_lgb, feats_clean_lgb)[sel, ],
+                   num_iteration = lgb_clean$best_iter)
+    }
+  }
+  as.list(metrics(p, y))
+}
+
+models <- c("woe_full", "woe_clean", "lgbm_full", "lgbm_clean")
+
+decay <- rbindlist(lapply(models, function(mk) {
+  rbindlist(lapply(quarters, function(q) {
+    m <- score_quarter(mk, q)
+    data.table(model = mk, quarter = q,
+               n = if (mk %in% c("woe_full","woe_clean"))
+                 nrow(test_woe[vintage_quarter == q])
+               else sum(test_vq == q),
+               def_rate = round(if (mk %in% c("woe_full","woe_clean"))
+                 mean(test_woe[vintage_quarter == q]$default)
+                 else mean(test_lgb$default[test_vq == q]), 4),
+               AUC = round(m$AUC, 4), Gini = round(m$Gini, 4),
+               KS = round(m$KS, 4), Brier = round(m$Brier, 4),
+               ECE = round(m$ECE, 4))
+  }))
+}))
+
+# ---- Console preview: the two trajectories that matter most ----
+cat("\n=== AUC across quarters (discrimination decay) ===\n")
+print(dcast(decay, model ~ quarter, value.var = "AUC"))
+cat("\n=== ECE across quarters (calibration decay) ===\n")
+print(dcast(decay, model ~ quarter, value.var = "ECE"))
+cat("\n=== Observed default rate by quarter (context) ===\n")
+print(decay[model == "woe_full", .(quarter, def_rate, n)])
