@@ -163,3 +163,101 @@ cmp <- merge(
   by = c("model", "quarter"))
 cat("\n=== Bad-loan coverage: split (broken) vs Mondrian (fixed) — lgbm_full ===\n")
 print(cmp[model == "lgbm_full"][order(quarter)])
+
+
+
+# =====================================================
+# 09_conformal.R  —  Section 3: Adaptive Conformal Inference (ACI, E6)
+# -----------------------------------------------------
+# Per-loan online ACI (Gibbs & Candes 2021) on top of the Mondrian
+# (class-conditional) scheme. E4 showed Mondrian RESTORES coverage but
+# LEAKS it under drift; ACI should HOLD it by nudging the per-class
+# effective alpha after each loan:
+#     alpha_{t+1} = alpha_t + gamma * (alpha_target - miss_t)
+# where miss_t = 1 if the true label was NOT in the set at step t.
+# Threshold for the current alpha is read from the calib-set scores
+# (quantile moves as alpha moves). Loans streamed in true issue_date order.
+# Citation: Gibbs & Candes (2021), "Adaptive conformal inference under
+# distribution shift". Prereq: Sections 1-2 of this script have run.
+# =====================================================
+
+stopifnot(exists("mondrian"), exists("conf_threshold"), exists("analysis"))
+
+alpha_target <- 0.10
+gammas <- c(0.005, 0.02, 0.05)     # step sizes for the sensitivity check
+
+# Quantile-from-alpha: given sorted calib scores, return threshold at level (1-a)
+thr_at_alpha <- function(sorted_scores, a) {
+  a <- min(max(a, 0), 1)                       # keep in [0,1]
+  n <- length(sorted_scores)
+  k <- ceiling((n + 1) * (1 - a))
+  k <- min(max(k, 1), n)
+  sorted_scores[k]
+}
+
+# Build the time-ordered test stream for one model: p, y, quarter, by issue_date
+build_stream <- function(spec_name) {
+  spec <- models_spec[[spec_name]]
+  # test rows aligned to analysis test rows (same order as score_set uses)
+  test_idx <- which(analysis$split_role == "test")
+  ord_local <- order(analysis$issue_date[test_idx])   # temporal order within test
+  # gather p,y per quarter then concatenate in test-row order, then reorder by date
+  pv <- numeric(length(test_idx)); yv <- numeric(length(test_idx))
+  vq <- analysis$vintage_quarter[test_idx]
+  for (qt in quarters) {
+    s <- score_set(spec, qt)
+    sel <- vq == qt
+    pv[sel] <- s$p; yv[sel] <- s$y
+  }
+  data.table(p = pv[ord_local], y = yv[ord_local],
+             quarter = vq[ord_local])[is.finite(p) & is.finite(y)]
+}
+
+# Run online ACI down one stream for a given gamma; return per-quarter coverage
+run_aci <- function(stream, cal_scores_good, cal_scores_bad, gamma) {
+  sg <- sort(cal_scores_good); sb <- sort(cal_scores_bad)
+  a_good <- alpha_target; a_bad <- alpha_target
+  n <- nrow(stream); covered <- logical(n)
+  p <- stream$p; y <- stream$y
+  for (i in seq_len(n)) {
+    if (y[i] == 0) {                                   # true-good loan
+      thr <- thr_at_alpha(sg, a_good)
+      cov <- (p[i] <= thr)                             # 'good' in set?
+      covered[i] <- cov
+      a_good <- a_good + gamma * (alpha_target - as.numeric(!cov))
+    } else {                                           # true-bad loan
+      thr <- thr_at_alpha(sb, a_bad)
+      cov <- ((1 - p[i]) <= thr)                       # 'bad' in set?
+      covered[i] <- cov
+      a_bad <- a_bad + gamma * (alpha_target - as.numeric(!cov))
+    }
+  }
+  data.table(quarter = stream$quarter, covered = covered, y = y)[
+    , .(coverage = round(mean(covered), 4),
+        cov_bad  = round(mean(covered[y == 1]), 4)),
+    by = quarter][order(quarter)]
+}
+
+# --- Run for the focal model (lgbm_full: the one that leaked most) ---
+focal <- "lgbm_full"
+spec  <- models_spec[[focal]]
+cal   <- score_set(spec, "calib")
+okc   <- is.finite(cal$p) & is.finite(cal$y)
+cg <- cal$p[okc][cal$y[okc] == 0]            # good calib scores = p
+cb <- (1 - cal$p[okc])[cal$y[okc] == 1]      # bad  calib scores = 1-p
+stream <- build_stream(focal)
+
+aci_res <- rbindlist(lapply(gammas, function(g) {
+  r <- run_aci(stream, cg, cb, g); r[, gamma := g]; r
+}))
+
+cat("\n=== ACI bad-loan coverage by quarter, focal =", focal,
+    "(target 0.90) ===\n")
+print(dcast(aci_res, quarter ~ gamma, value.var = "cov_bad"))
+
+cat("\n=== Comparison: Mondrian (frozen) vs ACI (gamma=0.02) bad-loan coverage ===\n")
+cmp_aci <- merge(
+  mondrian[model == focal, .(quarter, mondrian = cov_bad)],
+  aci_res[gamma == 0.02, .(quarter, aci = cov_bad)], by = "quarter")
+print(cmp_aci[order(quarter)])
+
