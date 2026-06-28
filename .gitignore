@@ -1,0 +1,5 @@
+data/raw/
+.Rproj.user
+data/processed/
+data/interim/
+.DS_Store
