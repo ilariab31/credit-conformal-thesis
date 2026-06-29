@@ -260,4 +260,3 @@ cmp_aci <- merge(
   mondrian[model == focal, .(quarter, mondrian = cov_bad)],
   aci_res[gamma == 0.02, .(quarter, aci = cov_bad)], by = "quarter")
 print(cmp_aci[order(quarter)])
-
